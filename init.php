@@ -131,7 +131,7 @@ class Af_Img_Phash extends Plugin {
 				<ul class='panel panel-scrollable list list-unstyled'>
 				<?php foreach ($enabled_feeds as $f) { ?>
 					<li><i class='material-icons'>rss_feed</i> <a href='#' onclick="CommonDialogs.editFeed(<?= $f ?>)">
-						<?= htmlspecialchars(Feeds::_get_title($f)) ?></a></li>
+						<?= htmlspecialchars(Feeds::_get_title($f, $_SESSION["uid"])) ?></a></li>
 				<?php } ?>
 				</ul>
 			<?php	} ?>
@@ -415,7 +415,7 @@ class Af_Img_Phash extends Plugin {
 
 	function hook_article_image($enclosures, $content, $site_url, $article) {
 		// fake guid because of further checking in hook_render_article_cdm() which we don't need here
-		$article = $this->_hook_render_article_cdm(["guid" => time(), "content" => $content], true);
+		$article = $this->_hook_render_article_cdm(["guid" => time(), "link" => $site_url, "content" => $content], true);
 
 		return ["", "", $article["content"]];
 	}
