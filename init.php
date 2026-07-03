@@ -18,6 +18,9 @@ class Af_Img_Phash extends Plugin {
 	/** @var DiskCache $cache */
 	private $cache;
 
+	/** @var array<string, bool> per-request memo of is_phash_duplicate() results */
+	private $dupe_memo = [];
+
 	function about() {
 		return array(null,
 			"Filter duplicate images using perceptual hashing (requires GD/Imagick)",
@@ -422,6 +425,12 @@ class Af_Img_Phash extends Plugin {
 	 */
 	private function is_phash_duplicate(string $src, string $article_guid, int $owner_uid, int $similarity): bool {
 
+		$memo_key = "$src|$article_guid";
+
+		if (isset($this->dupe_memo[$memo_key])) {
+			return $this->dupe_memo[$memo_key];
+		}
+
 		// check for URL duplicates first
 
 		$sth = $this->pdo->prepare("SELECT id FROM ttrss_plugin_img_phash_urls WHERE
@@ -431,7 +440,7 @@ class Af_Img_Phash extends Plugin {
 		$sth->execute([$owner_uid, $src, $article_guid]);
 
 		if ($sth->fetch()) {
-			return true;
+			return $this->dupe_memo[$memo_key] = true;
 		}
 
 		// check using perceptual hash duplicates
@@ -454,11 +463,11 @@ class Af_Img_Phash extends Plugin {
 			$sth->execute([$owner_uid, $similarity]);
 
 			if ($row = $sth->fetch()) {
-				return $row['article_guid'] != $article_guid;
+				return $this->dupe_memo[$memo_key] = ($row['article_guid'] != $article_guid);
 			}
 		}
 
-		return false;
+		return $this->dupe_memo[$memo_key] = false;
 	}
 
 	/**
