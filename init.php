@@ -368,10 +368,13 @@ class Af_Img_Phash extends Plugin {
 					}
 				}
 
+				$similarity = (int) $this->host->get($this, "similarity", $this->default_similarity);
+				$duplicate_of = $this->find_duplicate_of($hash, $article_guid, $owner_uid, $similarity);
+
 				$sth = $this->pdo->prepare("INSERT INTO
-					ttrss_plugin_img_phash_urls (url, article_guid, owner_uid, phash) VALUES
-					(?, ?, ?, ?)");
-				$sth->execute([$src, $article_guid, $owner_uid, $hash]);
+					ttrss_plugin_img_phash_urls (url, article_guid, owner_uid, phash, duplicate_of, dupe_similarity) VALUES
+					(?, ?, ?, ?, ?, ?)");
+				$sth->execute([$src, $article_guid, $owner_uid, $hash, $duplicate_of, $similarity]);
 			}
 		}
 
@@ -421,6 +424,26 @@ class Af_Img_Phash extends Plugin {
 	}
 
 	/**
+	 * Find the oldest similar image within the retention window (oldest wins).
+	 * @return ?string guid of the owning article, or null if the oldest match is
+	 * the article itself or there is no match
+	 */
+	private function find_duplicate_of(string $phash, string $article_guid, int $owner_uid, int $similarity): ?string {
+
+		$sth = $this->pdo->prepare("SELECT article_guid FROM ttrss_plugin_img_phash_urls WHERE
+			owner_uid = ? AND
+			created_at >= ".$this->interval_days($this->data_max_age)." AND
+			".$this->bitcount_func($phash)." <= ? ORDER BY created_at LIMIT 1");
+		$sth->execute([$owner_uid, $similarity]);
+
+		if (($row = $sth->fetch()) && $row['article_guid'] != $article_guid) {
+			return $row['article_guid'];
+		}
+
+		return null;
+	}
+
+	/**
 	 * Check if an image URL is a duplicate of one in a different article.
 	 */
 	private function is_phash_duplicate(string $src, string $article_guid, int $owner_uid, int $similarity): bool {
@@ -431,43 +454,41 @@ class Af_Img_Phash extends Plugin {
 			return $this->dupe_memo[$memo_key];
 		}
 
-		// check for URL duplicates first
-
-		$sth = $this->pdo->prepare("SELECT id FROM ttrss_plugin_img_phash_urls WHERE
-				owner_uid = ? AND
-				url = ? AND
-				article_guid != ? LIMIT 1");
-		$sth->execute([$owner_uid, $src, $article_guid]);
-
-		if ($sth->fetch()) {
-			return $this->dupe_memo[$memo_key] = true;
-		}
-
-		// check using perceptual hash duplicates
-
-		$sth = $this->pdo->prepare("SELECT phash FROM ttrss_plugin_img_phash_urls WHERE
+		$sth = $this->pdo->prepare("SELECT id, article_guid, phash, duplicate_of, dupe_similarity
+			FROM ttrss_plugin_img_phash_urls WHERE
 			owner_uid = ? AND
-			phash != -1 AND
 			url = ? LIMIT 1");
 		$sth->execute([$owner_uid, $src]);
 
-		if ($row = $sth->fetch()) {
-			$phash = $row['phash'];
-
-			//$similarity = 15;
-
-			$sth = $this->pdo->prepare("SELECT article_guid FROM ttrss_plugin_img_phash_urls WHERE
-				owner_uid = ? AND
-				created_at >= ".$this->interval_days($this->data_max_age)." AND
-				".$this->bitcount_func($phash)." <= ? ORDER BY created_at LIMIT 1");
-			$sth->execute([$owner_uid, $similarity]);
-
-			if ($row = $sth->fetch()) {
-				return $this->dupe_memo[$memo_key] = ($row['article_guid'] != $article_guid);
-			}
+		if (!($row = $sth->fetch())) {
+			return $this->dupe_memo[$memo_key] = false;
 		}
 
-		return $this->dupe_memo[$memo_key] = false;
+		// URL first seen in a different article
+		if ($row['article_guid'] != $article_guid) {
+			return $this->dupe_memo[$memo_key] = true;
+		}
+
+		// not an image
+		if ($row['phash'] == -1) {
+			return $this->dupe_memo[$memo_key] = false;
+		}
+
+		// stored computed result under the current similarity threshold
+		if ($row['dupe_similarity'] !== null && (int)$row['dupe_similarity'] === $similarity) {
+			return $this->dupe_memo[$memo_key] =
+				!empty($row['duplicate_of']) && $row['duplicate_of'] != $article_guid;
+		}
+
+		// legacy row or threshold changed: recompute once and store the fresh result
+		$duplicate_of = $this->find_duplicate_of($row['phash'], $row['article_guid'], $owner_uid, $similarity);
+
+		$sth = $this->pdo->prepare("UPDATE ttrss_plugin_img_phash_urls
+			SET duplicate_of = ?, dupe_similarity = ? WHERE id = ?");
+		$sth->execute([$duplicate_of, $similarity, $row['id']]);
+
+		return $this->dupe_memo[$memo_key] =
+			!empty($duplicate_of) && $duplicate_of != $article_guid;
 	}
 
 	/**
