@@ -43,6 +43,7 @@ class Af_Img_Phash extends Plugin {
 		$enable_globally = checkbox_to_sql_bool($_POST["phash_enable_globally"]);
 
 		if ($similarity < 0) $similarity = 0;
+		if ($similarity > 64) $similarity = 64;
 
 		$this->host->set($this, "similarity", $similarity);
 		$this->host->set($this, "enable_globally", $enable_globally);
@@ -99,6 +100,7 @@ class Af_Img_Phash extends Plugin {
 				<fieldset>
 					<label><?= $this->__( "Maximum Hamming distance:") ?></label>
 					<input dojoType='dijit.form.NumberSpinner'
+						constraints='{min:0,max:64,places:0}'
 						placeholder='5' required='1' name='similarity' id='phash_img_similarity' value='<?= $similarity ?>'>
 
 					<div dojoType='dijit.Tooltip' connectId='phash_img_similarity' position='below'>
