@@ -1,4 +1,7 @@
 {
+    "config": {
+        "optimize-autoloader": true
+    },
     "require": {
         "jenssegers/imagehash": "^0.11.0"
     }
